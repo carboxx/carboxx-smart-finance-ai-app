@@ -29,14 +29,18 @@ export class Database {
         assetName: 'MSCI World ETF',
         assetSymbol: 'SWDA',
         amount: 300,
-        frequency: 'monthly'
+        frequency: 'monthly',
+        startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(), // 3 months ago
+        initialCapital: 1000
       });
       
       this.addPACPlan({
         assetName: 'S&P 500 ETF',
         assetSymbol: 'SPY',
         amount: 200,
-        frequency: 'monthly'
+        frequency: 'monthly',
+        startDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), // 2 months ago
+        initialCapital: 0
       });
     }
     
@@ -148,28 +152,86 @@ export class Database {
       ...plan,
       isActive: true,
       createdAt: new Date().toISOString(),
-      nextExecutionDate: this.calculateNextExecution(plan.frequency)
+      startDate: plan.startDate || new Date().toISOString(),
+      initialCapital: plan.initialCapital || 0,
+      nextExecutionDate: this.calculateNextExecution(plan.frequency, plan.startDate),
+      totalInvested: this.calculatePACTotalInvested(plan.startDate, plan.amount, plan.frequency, plan.initialCapital)
     };
     pacPlans.push(newPlan);
     this.saveTable('pac_plans', pacPlans);
     return newPlan;
   }
 
+  calculatePACTotalInvested(startDate, monthlyAmount, frequency, initialCapital = 0) {
+    const start = new Date(startDate);
+    const now = new Date();
+    const monthsDiff = Math.max(0, Math.floor((now - start) / (1000 * 60 * 60 * 24 * 30.44))); // Average days per month
+    
+    let totalMonthlyPayments = 0;
+    switch (frequency) {
+      case 'weekly':
+        totalMonthlyPayments = monthsDiff * (monthlyAmount * 52 / 12);
+        break;
+      case 'monthly':
+        totalMonthlyPayments = monthsDiff * monthlyAmount;
+        break;
+      case 'quarterly':
+        totalMonthlyPayments = Math.floor(monthsDiff / 3) * monthlyAmount;
+        break;
+      default:
+        totalMonthlyPayments = monthsDiff * monthlyAmount;
+    }
+    
+    return initialCapital + totalMonthlyPayments;
+  }
+
   getPACPlans() {
     return this.getTable('pac_plans');
   }
 
-  calculateNextExecution(frequency) {
+  deleteInvestment(id) {
+    const investments = this.getTable('investments');
+    const filtered = investments.filter(inv => inv.id !== id);
+    this.saveTable('investments', filtered);
+    return true;
+  }
+
+  deletePACPlan(id) {
+    const pacPlans = this.getTable('pac_plans');
+    const filtered = pacPlans.filter(plan => plan.id !== id);
+    this.saveTable('pac_plans', filtered);
+    return true;
+  }
+
+  calculateNextExecution(frequency, startDate) {
     const now = new Date();
+    const start = startDate ? new Date(startDate) : now;
+    
     switch (frequency) {
       case 'weekly':
-        return new Date(now.setDate(now.getDate() + 7)).toISOString();
+        const nextWeekly = new Date(start);
+        while (nextWeekly <= now) {
+          nextWeekly.setDate(nextWeekly.getDate() + 7);
+        }
+        return nextWeekly.toISOString();
       case 'monthly':
-        return new Date(now.setMonth(now.getMonth() + 1)).toISOString();
+        const nextMonthly = new Date(start);
+        while (nextMonthly <= now) {
+          nextMonthly.setMonth(nextMonthly.getMonth() + 1);
+        }
+        return nextMonthly.toISOString();
       case 'quarterly':
-        return new Date(now.setMonth(now.getMonth() + 3)).toISOString();
+        const nextQuarterly = new Date(start);
+        while (nextQuarterly <= now) {
+          nextQuarterly.setMonth(nextQuarterly.getMonth() + 3);
+        }
+        return nextQuarterly.toISOString();
       default:
-        return new Date(now.setMonth(now.getMonth() + 1)).toISOString();
+        const nextDefault = new Date(start);
+        while (nextDefault <= now) {
+          nextDefault.setMonth(nextDefault.getMonth() + 1);
+        }
+        return nextDefault.toISOString();
     }
   }
 
@@ -231,6 +293,7 @@ export class Database {
   getPortfolioSummary() {
     const transactions = this.getTable('transactions');
     const investments = this.getTable('investments');
+    const pacPlans = this.getTable('pac_plans');
     const expenses = this.getTable('expenses');
 
     const totalIncome = transactions
@@ -243,12 +306,28 @@ export class Database {
     const totalInvestments = investments
       .reduce((sum, i) => sum + (i.currentValue || i.quantity * i.purchasePrice), 0);
 
-    const netWorth = totalIncome - totalExpenses + totalInvestments;
+    // Calculate total PAC investments (amount actually invested so far)
+    const totalPACInvestments = pacPlans
+      .filter(pac => pac.isActive)
+      .reduce((sum, pac) => {
+        const totalInvested = this.calculatePACTotalInvested(
+          pac.startDate || pac.createdAt, 
+          pac.amount, 
+          pac.frequency, 
+          pac.initialCapital || 0
+        );
+        return sum + totalInvested;
+      }, 0);
+
+    const combinedInvestments = totalInvestments + totalPACInvestments;
+    const netWorth = totalIncome - totalExpenses + combinedInvestments;
 
     return {
       totalIncome,
       totalExpenses,
-      totalInvestments,
+      totalInvestments: combinedInvestments, // Include PAC in total
+      totalDirectInvestments: totalInvestments, // Only direct investments  
+      totalPACInvestments, // Only PAC investments
       netWorth,
       cashFlow: totalIncome - totalExpenses
     };

@@ -15,30 +15,80 @@ import {
 } from '@heroicons/react/24/outline';
 import { motion, AnimatePresence } from 'framer-motion';
 import { financialChatbot } from '../lib/chatbot';
-import { chatManager } from '../lib/chatManager';
+import { realAIChatbot } from '../lib/aiChatbot';
+import { useUserContext } from '../context/UserContext';
 
 export default function Chat() {
-  const [messages, setMessages] = useState([
-    {
-      id: '1',
-      type: 'assistant',
-      content: `👋 Ciao! Sono il tuo assistente finanziario AI con **memoria persistente**!
+  const { userProfile } = useUserContext();
+  const [messages, setMessages] = useState([]);
 
-🧠 **Funzionalità avanzate:**
-• 📊 Analisi in tempo reale dei tuoi dati
-• 🤖 Sistema RAG per recupero informazioni intelligente
-• 💾 Memoria conversazionale che ricorda tutto
-• 🔍 Insights personalizzati e proattivi
-• 📈 Monitoraggio continuo del portafoglio
+  // Load messages from localStorage on component mount
+  useEffect(() => {
+    const loadMessages = () => {
+      try {
+        const savedMessages = localStorage.getItem('chat_messages');
+        if (savedMessages) {
+          const parsedMessages = JSON.parse(savedMessages);
+          // Convert timestamp strings back to Date objects
+          const messagesWithDates = parsedMessages.map(msg => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }));
+          setMessages(messagesWithDates);
+        } else {
+          // Set default welcome message if no saved messages
+          setMessages([{
+            id: '1',
+            type: 'assistant',
+            content: `👋 **Ciao ${userProfile.name}! Assistente Finanziario AI - Versione Avanzata**
 
-Posso rispondere a domande complesse e ricordare le nostre conversazioni precedenti. Cosa vuoi sapere delle tue finanze?`,
-      timestamp: new Date(),
-      insights: [],
-      relevantData: []
+Sono connesso a una **vera AI (Groq)** con accesso completo ai tuoi dati finanziari!
+
+✨ **Caratteristiche uniche:**
+• 🧠 **Vera AI**: Powered by Llama-3-8B
+• 📊 **Dati in tempo reale**: Accesso diretto al tuo portafoglio
+• 💬 **Conversazione naturale**: Memoria delle chat precedenti
+• 🔍 **Analisi avanzate**: Insights personalizzati e consigli professionali
+• 🎯 **RAG System**: Recupero intelligente delle informazioni
+
+**Prova a chiedere:**
+• "Come va il mio portafoglio questo mese?"
+• "Dammi consigli sui miei investimenti"
+• "Analizza le mie spese per categoria"
+• "Devo aumentare il mio piano PAC?"
+
+Cosa vorresti sapere delle tue finanze? 💰`,
+            timestamp: new Date(),
+            insights: [],
+            relevantData: []
+          }]);
+        }
+      } catch (error) {
+        console.error('Error loading chat messages:', error);
+        // Fallback to default message
+        setMessages([{
+          id: '1',
+          type: 'assistant',
+          content: `👋 **Ciao ${userProfile.name}! Assistente Finanziario AI - Versione Avanzata**`,
+          timestamp: new Date(),
+          insights: [],
+          relevantData: []
+        }]);
+      }
+    };
+    
+    loadMessages();
+  }, [userProfile.name]);
+
+  // Save messages to localStorage whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('chat_messages', JSON.stringify(messages));
     }
-  ]);
+  }, [messages]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [useRealAI, setUseRealAI] = useState(true);
   const messagesEndRef = useRef(null);
 
   const suggestedQuestions = [
@@ -71,12 +121,19 @@ Posso rispondere a domande complesse e ricordare le nostre conversazioni precede
     setIsLoading(true);
 
     try {
-      // Use simplified chatbot call for now
-      const aiResponse = await financialChatbot.generateResponse(
-        inputMessage,
-        financialChatbot.retrieveRelevantData(inputMessage),
-        financialChatbot.generateInsights(financialChatbot.retrieveRelevantData(inputMessage))
-      );
+      let aiResponse;
+      
+      if (useRealAI) {
+        // Use real AI (Groq)
+        aiResponse = await realAIChatbot.sendMessage(inputMessage, userProfile.name);
+      } else {
+        // Use simulated AI
+        aiResponse = await financialChatbot.generateResponse(
+          inputMessage,
+          financialChatbot.retrieveRelevantData(inputMessage),
+          financialChatbot.generateInsights(financialChatbot.retrieveRelevantData(inputMessage))
+        );
+      }
       
       const assistantMessage = {
         id: (Date.now() + 1).toString(),
@@ -93,12 +150,22 @@ Posso rispondere a domande complesse e ricordare le nostre conversazioni precede
       const errorMessage = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: "❌ Scusa, ho avuto un problema. Riprova!",
+        content: `❌ Errore nell'AI: ${error.message || 'Problema di connessione'}. 
+        
+🔧 **Soluzioni:**
+• Verifica la connessione internet
+• L'API key Groq potrebbe essere scaduta
+• Prova a ricaricare la pagina
+        
+Sto passando al sistema simulato...`,
         timestamp: new Date(),
         insights: [],
         relevantData: []
       };
       setMessages(prev => [...prev, errorMessage]);
+      
+      // Fallback to simulated AI
+      setUseRealAI(false);
     } finally {
       setIsLoading(false);
     }
@@ -112,10 +179,10 @@ Posso rispondere a domande complesse e ricordare le nostre conversazioni precede
   };
 
   const clearChat = () => {
-    setMessages([{
+    const welcomeMessage = {
       id: '1',
       type: 'assistant',
-      content: `👋 Ciao! Sono il tuo assistente finanziario AI con **memoria persistente**!
+      content: `👋 Ciao ${userProfile.name}! Sono il tuo assistente finanziario AI con **memoria persistente**!
 
 🧠 **Funzionalità avanzate:**
 • 📊 Analisi in tempo reale dei tuoi dati
@@ -128,7 +195,11 @@ Posso rispondere a domande complesse e ricordare le nostre conversazioni precede
       timestamp: new Date(),
       insights: [],
       relevantData: []
-    }]);
+    };
+    
+    setMessages([welcomeMessage]);
+    // Also clear from localStorage
+    localStorage.setItem('chat_messages', JSON.stringify([welcomeMessage]));
   };
 
   return (
@@ -142,20 +213,39 @@ Posso rispondere a domande complesse e ricordare le nostre conversazioni precede
               <SparklesIcon className="absolute -top-1 -right-1 h-4 w-4 text-blue-500" />
             </div>
             Assistente AI Finanziario
+            {useRealAI && (
+              <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full dark:bg-green-900/20 dark:text-green-400">
+                AI Reale
+              </span>
+            )}
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Analisi personalizzate con RAG e AI per le tue finanze
+            {useRealAI ? 'Powered by Groq Llama-3-8B' : 'Modalità simulata'} - Analisi personalizzate per le tue finanze
           </p>
         </div>
         
-        <button
-          onClick={clearChat}
-          className="btn-secondary flex items-center space-x-2"
-          title="Pulisci chat"
-        >
-          <TrashIcon className="h-4 w-4" />
-          <span>Pulisci</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setUseRealAI(!useRealAI)}
+            className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+              useRealAI 
+                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400' 
+                : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+            }`}
+            title={useRealAI ? 'Passa ad AI simulata' : 'Passa ad AI reale'}
+          >
+            {useRealAI ? '🤖 AI Reale' : '🎭 Simulata'}
+          </button>
+          
+          <button
+            onClick={clearChat}
+            className="btn-secondary flex items-center space-x-2"
+            title="Pulisci chat"
+          >
+            <TrashIcon className="h-4 w-4" />
+            <span>Pulisci</span>
+          </button>
+        </div>
       </div>
 
       {/* Chat Container */}

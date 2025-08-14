@@ -6,11 +6,13 @@ import {
   ChartBarIcon,
   CurrencyDollarIcon,
   ClockIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 import { motion } from 'framer-motion';
 import { db } from '../lib/database';
 import Modal, { FormField, Input, Select } from './Modal';
+import { usePrivacyContext } from '../context/PrivacyContext';
 
 export default function Investments() {
   const [investments, setInvestments] = useState([]);
@@ -18,6 +20,7 @@ export default function Investments() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPacModal, setShowPacModal] = useState(false);
   const [activeTab, setActiveTab] = useState('portfolio');
+  const { formatAmount } = usePrivacyContext();
 
   useEffect(() => {
     loadInvestments();
@@ -44,6 +47,20 @@ export default function Investments() {
     db.addPACPlan(formData);
     loadPacPlans();
     setShowPacModal(false);
+  };
+
+  const handleDeleteInvestment = (id) => {
+    if (confirm('Sei sicuro di voler eliminare questo investimento?')) {
+      db.deleteInvestment(id);
+      loadInvestments();
+    }
+  };
+
+  const handleDeletePac = (id) => {
+    if (confirm('Sei sicuro di voler eliminare questo piano PAC?')) {
+      db.deletePACPlan(id);
+      loadPacPlans();
+    }
   };
 
   const getTotalPortfolioValue = () => {
@@ -75,20 +92,19 @@ export default function Investments() {
     }, 0);
   };
 
-  const getTotalPacYearlyAmount = () => {
+  const getTotalPacInvestedAmount = () => {
     return pacPlans.reduce((total, plan) => {
       if (!plan.isActive) return total;
       
-      switch (plan.frequency) {
-        case 'weekly':
-          return total + (plan.amount * 52);
-        case 'monthly':
-          return total + (plan.amount * 12);
-        case 'quarterly':
-          return total + (plan.amount * 4);
-        default:
-          return total + (plan.amount * 12);
-      }
+      // Use the actual invested amount calculated by the database
+      const totalInvested = db.calculatePACTotalInvested(
+        plan.startDate || plan.createdAt, 
+        plan.amount, 
+        plan.frequency, 
+        plan.initialCapital || 0
+      );
+      
+      return total + totalInvested;
     }, 0);
   };
 
@@ -137,7 +153,7 @@ export default function Investments() {
             <div className="ml-4">
               <p className="text-sm text-gray-600 dark:text-gray-400">Valore Totale</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                €{getTotalPortfolioValue().toLocaleString('it-IT')}
+                {formatAmount(getTotalPortfolioValue())}
               </p>
             </div>
           </div>
@@ -160,7 +176,7 @@ export default function Investments() {
             <div className="ml-4">
               <p className="text-sm text-gray-600 dark:text-gray-400">Guadagno/Perdita</p>
               <p className={`text-2xl font-bold ${getTotalGainLoss() >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                €{getTotalGainLoss().toLocaleString('it-IT')}
+                {formatAmount(getTotalGainLoss())}
               </p>
             </div>
           </div>
@@ -231,7 +247,12 @@ export default function Investments() {
           ) : (
             <div className="grid gap-4">
               {investments.map((investment) => (
-                <InvestmentCard key={investment.id} investment={investment} />
+                <InvestmentCard 
+                  key={investment.id} 
+                  investment={investment} 
+                  onDelete={handleDeleteInvestment}
+                  formatAmount={formatAmount}
+                />
               ))}
             </div>
           )}
@@ -260,7 +281,7 @@ export default function Investments() {
                   <div className="ml-4">
                     <p className="text-sm text-gray-600 dark:text-gray-400">PAC Mensile Totale</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      €{getTotalPacMonthlyAmount().toLocaleString('it-IT')}
+                      {formatAmount(getTotalPacMonthlyAmount())}
                     </p>
                   </div>
                 </div>
@@ -277,9 +298,9 @@ export default function Investments() {
                     <ChartBarIcon className="h-6 w-6 text-blue-600" />
                   </div>
                   <div className="ml-4">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Investimenti Annuali</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Totale Investito PAC</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      €{getTotalPacYearlyAmount().toLocaleString('it-IT')}
+                      {formatAmount(getTotalPacInvestedAmount())}
                     </p>
                   </div>
                 </div>
@@ -319,7 +340,12 @@ export default function Investments() {
           ) : (
             <div className="grid gap-4">
               {pacPlans.map((plan) => (
-                <PacCard key={plan.id} plan={plan} />
+                <PacCard 
+                  key={plan.id} 
+                  plan={plan} 
+                  onDelete={handleDeletePac}
+                  formatAmount={formatAmount}
+                />
               ))}
             </div>
           )}
@@ -344,7 +370,7 @@ export default function Investments() {
   );
 }
 
-function InvestmentCard({ investment }) {
+function InvestmentCard({ investment, onDelete, formatAmount }) {
   const currentValue = investment.currentValue || investment.quantity * investment.purchasePrice;
   const investedAmount = investment.quantity * investment.purchasePrice;
   const gainLoss = currentValue - investedAmount;
@@ -386,33 +412,42 @@ function InvestmentCard({ investment }) {
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Prezzo Acquisto</p>
               <p className="font-semibold text-gray-900 dark:text-gray-100">
-                €{investment.purchasePrice}
+                {formatAmount(investment.purchasePrice)}
               </p>
             </div>
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Valore Attuale</p>
               <p className="font-semibold text-gray-900 dark:text-gray-100">
-                €{currentValue.toLocaleString('it-IT')}
+                {formatAmount(currentValue)}
               </p>
             </div>
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Guadagno/Perdita</p>
               <p className={`font-semibold ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                €{gainLoss.toLocaleString('it-IT')} ({gainLossPercentage.toFixed(2)}%)
+                {formatAmount(gainLoss)} ({gainLossPercentage.toFixed(2)}%)
               </p>
             </div>
           </div>
         </div>
 
-        <button className="ml-4 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-          <ArrowPathIcon className="h-5 w-5" />
-        </button>
+        <div className="ml-4 flex space-x-2">
+          <button 
+            onClick={() => onDelete(investment.id)}
+            className="p-2 text-red-400 hover:text-red-600 dark:hover:text-red-300"
+            title="Elimina investimento"
+          >
+            <TrashIcon className="h-5 w-5" />
+          </button>
+          <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+            <ArrowPathIcon className="h-5 w-5" />
+          </button>
+        </div>
       </div>
     </motion.div>
   );
 }
 
-function PacCard({ plan }) {
+function PacCard({ plan, onDelete, formatAmount }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -432,16 +467,30 @@ function PacCard({ plan }) {
                 PAC {plan.assetName}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {plan.frequency} • €{plan.amount} per versamento
+                {plan.frequency} • {formatAmount(plan.amount)} per versamento
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                Iniziato il {new Date(plan.startDate || plan.createdAt).toLocaleDateString('it-IT')}
               </p>
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Importo</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Importo Mensile</p>
               <p className="font-semibold text-gray-900 dark:text-gray-100">
-                €{plan.amount}
+                {formatAmount ? formatAmount(plan.amount) : `€${plan.amount}`}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Investito Totale</p>
+              <p className="font-semibold text-green-600 dark:text-green-400">
+                {formatAmount(db.calculatePACTotalInvested(
+                  plan.startDate || plan.createdAt, 
+                  plan.amount, 
+                  plan.frequency, 
+                  plan.initialCapital || 0
+                ))}
               </p>
             </div>
             <div>
@@ -451,7 +500,7 @@ function PacCard({ plan }) {
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Prossima Esecuzione</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Prossimo Versamento</p>
               <p className="font-semibold text-gray-900 dark:text-gray-100">
                 {new Date(plan.nextExecutionDate).toLocaleDateString('it-IT')}
               </p>
@@ -469,9 +518,18 @@ function PacCard({ plan }) {
           </div>
         </div>
 
-        <button className="ml-4 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-          <ArrowPathIcon className="h-5 w-5" />
-        </button>
+        <div className="ml-4 flex space-x-2">
+          <button 
+            onClick={() => onDelete(plan.id)}
+            className="p-2 text-red-400 hover:text-red-600 dark:hover:text-red-300"
+            title="Elimina piano PAC"
+          >
+            <TrashIcon className="h-5 w-5" />
+          </button>
+          <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+            <ArrowPathIcon className="h-5 w-5" />
+          </button>
+        </div>
       </div>
     </motion.div>
   );
@@ -617,7 +675,9 @@ function AddPacModal({ onClose, onSubmit }) {
     assetName: '',
     assetSymbol: '',
     amount: '',
-    frequency: 'monthly'
+    frequency: 'monthly',
+    startDate: new Date().toISOString().split('T')[0],
+    initialCapital: ''
   });
 
   const [errors, setErrors] = useState({});
@@ -637,7 +697,8 @@ function AddPacModal({ onClose, onSubmit }) {
     if (validateForm()) {
       onSubmit({
         ...formData,
-        amount: parseFloat(formData.amount)
+        amount: parseFloat(formData.amount),
+        initialCapital: parseFloat(formData.initialCapital) || 0
       });
     }
   };
@@ -708,6 +769,26 @@ function AddPacModal({ onClose, onSubmit }) {
           </FormField>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <FormField label="Data di Inizio" required>
+            <Input
+              type="date"
+              value={formData.startDate}
+              onChange={(e) => setFormData({...formData, startDate: e.target.value})}
+            />
+          </FormField>
+
+          <FormField label="Capitale Iniziale (€)" description="Importo versato all'inizio (opzionale)">
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.initialCapital}
+              onChange={(e) => setFormData({...formData, initialCapital: e.target.value})}
+              placeholder="0.00"
+            />
+          </FormField>
+        </div>
+
         {formData.amount && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -723,8 +804,19 @@ function AddPacModal({ onClose, onSubmit }) {
                   €{calculateYearlyAmount().toLocaleString('it-IT')}
                 </span>
               </div>
+              {formData.initialCapital && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                    Capitale iniziale:
+                  </span>
+                  <span className="text-md font-semibold text-green-900 dark:text-green-100">
+                    €{parseFloat(formData.initialCapital).toLocaleString('it-IT')}
+                  </span>
+                </div>
+              )}
               <div className="text-xs text-green-600 dark:text-green-400">
                 {frequencyOptions[formData.frequency].desc} × €{formData.amount} = €{calculateYearlyAmount().toLocaleString('it-IT')}/anno
+                {formData.initialCapital && ` + €${formData.initialCapital} iniziale`}
               </div>
             </div>
           </motion.div>

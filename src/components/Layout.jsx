@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   HomeIcon, 
   ChartBarIcon, 
@@ -10,10 +10,15 @@ import {
   XMarkIcon,
   BellIcon,
   SunIcon,
-  MoonIcon
+  MoonIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/react/24/outline';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { useThemeContext } from '../context/ThemeContext';
+import { usePrivacyContext } from '../context/PrivacyContext';
+import { useUserContext } from '../context/UserContext';
+import { db } from '../lib/database';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: HomeIcon },
@@ -26,7 +31,23 @@ const navigation = [
 
 export default function Layout({ children, currentPage = '/', onNavigate }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [portfolioSummary, setPortfolioSummary] = useState({ netWorth: 0 });
   const { theme, toggleTheme } = useThemeContext();
+  const { hideAmounts, toggleAmounts, formatAmount } = usePrivacyContext();
+  const { userProfile } = useUserContext();
+
+  useEffect(() => {
+    const loadPortfolioSummary = () => {
+      const summary = db.getPortfolioSummary();
+      setPortfolioSummary(summary);
+    };
+
+    loadPortfolioSummary();
+    // Refresh portfolio summary every 5 seconds
+    const interval = setInterval(loadPortfolioSummary, 5000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -48,7 +69,14 @@ export default function Layout({ children, currentPage = '/', onNavigate }) {
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
               className="fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-gray-800 shadow-lg lg:hidden"
             >
-              <SidebarContent currentPage={currentPage} onNavigate={onNavigate} closeSidebar={() => setSidebarOpen(false)} />
+              <SidebarContent 
+                currentPage={currentPage} 
+                onNavigate={onNavigate} 
+                closeSidebar={() => setSidebarOpen(false)}
+                formatAmount={formatAmount}
+                portfolioSummary={portfolioSummary}
+                userProfile={userProfile}
+              />
             </motion.div>
           </>
         )}
@@ -56,7 +84,13 @@ export default function Layout({ children, currentPage = '/', onNavigate }) {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-        <SidebarContent currentPage={currentPage} onNavigate={onNavigate} />
+        <SidebarContent 
+          currentPage={currentPage} 
+          onNavigate={onNavigate}
+          formatAmount={formatAmount}
+          portfolioSummary={portfolioSummary}
+          userProfile={userProfile}
+        />
       </div>
 
       {/* Main content */}
@@ -81,6 +115,19 @@ export default function Layout({ children, currentPage = '/', onNavigate }) {
             <div className="flex items-center gap-x-4 lg:gap-x-6">
               <button
                 type="button"
+                onClick={toggleAmounts}
+                className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
+                title={hideAmounts ? 'Mostra importi' : 'Nascondi importi'}
+              >
+                {hideAmounts ? (
+                  <EyeSlashIcon className="h-6 w-6" />
+                ) : (
+                  <EyeIcon className="h-6 w-6" />
+                )}
+              </button>
+              
+              <button
+                type="button"
                 onClick={toggleTheme}
                 className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
                 title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
@@ -103,10 +150,10 @@ export default function Layout({ children, currentPage = '/', onNavigate }) {
 
               <div className="flex items-center space-x-2">
                 <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center">
-                  <span className="text-white text-sm font-medium">U</span>
+                  <span className="text-white text-sm font-medium">{userProfile.name.charAt(0).toUpperCase()}</span>
                 </div>
                 <span className="hidden lg:block text-sm font-medium text-gray-900 dark:text-gray-100">
-                  Utente
+                  {userProfile.name}
                 </span>
               </div>
             </div>
@@ -124,7 +171,7 @@ export default function Layout({ children, currentPage = '/', onNavigate }) {
   );
 }
 
-function SidebarContent({ currentPage, onNavigate, closeSidebar }) {
+function SidebarContent({ currentPage, onNavigate, closeSidebar, formatAmount, portfolioSummary, userProfile }) {
   return (
     <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-white dark:bg-gray-800 px-6 pb-4">
       <div className="flex h-16 shrink-0 items-center justify-between">
@@ -194,7 +241,7 @@ function SidebarContent({ currentPage, onNavigate, closeSidebar }) {
                     Patrimonio Totale
                   </p>
                   <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                    €12,450.00
+                    {formatAmount(portfolioSummary.netWorth)}
                   </p>
                 </div>
               </div>

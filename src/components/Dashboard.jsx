@@ -25,6 +25,7 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import { db } from '../lib/database';
+import { usePrivacyContext } from '../context/PrivacyContext';
 
 const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6'];
 
@@ -33,6 +34,7 @@ export default function Dashboard({ onNavigate }) {
   const [chartData, setChartData] = useState([]);
   const [expenseData, setExpenseData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { formatAmount } = usePrivacyContext();
 
   useEffect(() => {
     loadDashboardData();
@@ -40,32 +42,13 @@ export default function Dashboard({ onNavigate }) {
 
   const loadDashboardData = () => {
     try {
-      // Get real portfolio summary
+      // Use the centralized portfolio summary from database
       const portfolio = db.getPortfolioSummary();
       const transactions = db.getTransactions();
       const expenses = db.getExpenses();
-      const investments = db.getInvestments();
+      const investments = db.getInvestments(); // Still needed for chart data
       
-      // Calculate real totals
-      const totalIncome = transactions
-        .filter(t => t.type === 'income')
-        .reduce((sum, t) => sum + t.amount, 0);
-      
-      const totalExpenses = expenses
-        .reduce((sum, e) => sum + e.amount, 0);
-        
-      const totalInvestments = investments
-        .reduce((sum, i) => sum + (i.currentValue || i.quantity * i.purchasePrice), 0);
-
-      const realPortfolio = {
-        totalIncome,
-        totalExpenses,
-        totalInvestments,
-        netWorth: totalIncome - totalExpenses + totalInvestments,
-        cashFlow: totalIncome - totalExpenses
-      };
-      
-      setPortfolioData(realPortfolio);
+      setPortfolioData(portfolio);
 
       // Generate real chart data based on last 12 months
       const now = new Date();
@@ -217,7 +200,7 @@ export default function Dashboard({ onNavigate }) {
               <div className="ml-4 flex-1">
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{stat.name}</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  €{stat.value.toLocaleString('it-IT')}
+                  {formatAmount(stat.value)}
                 </p>
               </div>
               <div className={`flex items-center ${stat.changeType === 'increase' ? 'text-green-600' : 'text-red-600'}`}>
